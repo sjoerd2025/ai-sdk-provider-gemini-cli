@@ -155,8 +155,12 @@ function mapAssistantMessage(
       case 'tool-call': {
         // Extract thoughtSignature from providerOptions if present
         // This is critical for Gemini 3 which requires signatures on function calls
-        const providerOptions = (part as { providerOptions?: Record<string, unknown> }).providerOptions;
-        const geminiCliOptions = providerOptions?.['gemini-cli'] as { thoughtSignature?: string } | undefined;
+        const providerOptions = (
+          part as { providerOptions?: Record<string, unknown> }
+        ).providerOptions;
+        const geminiCliOptions = providerOptions?.['gemini-cli'] as
+          | { thoughtSignature?: string }
+          | undefined;
         const thoughtSignature = geminiCliOptions?.thoughtSignature;
 
         // Build the part with optional thoughtSignature

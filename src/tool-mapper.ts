@@ -46,6 +46,11 @@ export function mapToolsToGeminiFormat(
   return [{ functionDeclarations }];
 }
 
+// Cache for zod-to-json-schema module
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let zodToJsonSchemaModule: any;
+let hasTriedToLoadZodToJsonSchema = false;
+
 /**
  * Attempts to convert a Zod schema to JSON Schema using available methods
  */
@@ -68,14 +73,24 @@ function convertZodToJsonSchema(zodSchema: z.ZodSchema): unknown {
   }
 
   // Try zod-to-json-schema for Zod v3 compatibility
-  try {
-    // Lazy load zod-to-json-schema to avoid import errors with Zod v4
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment
-    const zodToJsonSchemaModule = require('zod-to-json-schema');
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
-    return zodToJsonSchemaModule.zodToJsonSchema(zodSchema);
-  } catch {
-    // zod-to-json-schema not available or not compatible
+  if (!zodToJsonSchemaModule && !hasTriedToLoadZodToJsonSchema) {
+    hasTriedToLoadZodToJsonSchema = true;
+    try {
+      // Lazy load zod-to-json-schema to avoid import errors with Zod v4
+      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-unsafe-assignment
+      zodToJsonSchemaModule = require('zod-to-json-schema');
+    } catch {
+      // zod-to-json-schema not available or not compatible
+    }
+  }
+
+  if (zodToJsonSchemaModule) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
+      return zodToJsonSchemaModule.zodToJsonSchema(zodSchema);
+    } catch {
+      // zod-to-json-schema failed
+    }
   }
 
   // No conversion method available
