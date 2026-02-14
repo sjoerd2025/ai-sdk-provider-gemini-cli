@@ -474,7 +474,9 @@ export class GeminiLanguageModel implements LanguageModelV3 {
               ...(geminiPart.thoughtSignature
                 ? {
                     providerMetadata: {
-                      'gemini-cli': { thoughtSignature: geminiPart.thoughtSignature },
+                      'gemini-cli': {
+                        thoughtSignature: geminiPart.thoughtSignature,
+                      },
                     },
                   }
                 : {}),
@@ -730,7 +732,9 @@ export class GeminiLanguageModel implements LanguageModelV3 {
                       ...(geminiPart.thoughtSignature
                         ? {
                             providerMetadata: {
-                              'gemini-cli': { thoughtSignature: geminiPart.thoughtSignature },
+                              'gemini-cli': {
+                                thoughtSignature: geminiPart.thoughtSignature,
+                              },
                             },
                           }
                         : {}),
