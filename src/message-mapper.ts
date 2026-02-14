@@ -196,7 +196,7 @@ function mapFilePart(part: LanguageModelV3FilePart): Part {
     base64Data = part.data;
   } else if (part.data instanceof Uint8Array) {
     // Convert Uint8Array to base64
-    base64Data = Buffer.from(part.data).toString('base64');
+    base64Data = Buffer.from(part.data.buffer, part.data.byteOffset, part.data.byteLength).toString('base64');
   } else {
     throw new Error('Unsupported file format');
   }
