@@ -474,7 +474,9 @@ export class GeminiLanguageModel implements LanguageModelV3 {
               ...(geminiPart.thoughtSignature
                 ? {
                     providerMetadata: {
-                      'gemini-cli': { thoughtSignature: geminiPart.thoughtSignature },
+                      'gemini-cli': {
+                        thoughtSignature: geminiPart.thoughtSignature,
+                      },
                     },
                   }
                 : {}),
@@ -678,122 +680,153 @@ export class GeminiLanguageModel implements LanguageModelV3 {
 
             const streamStartTime = Date.now();
             logger.debug('[gemini-cli] Stream started, processing chunks');
+            // Setup manual iteration to support abort signal racing
+            const iterator = streamResponse[Symbol.asyncIterator]();
+            let abortHandler: (() => void) | undefined;
 
-            for await (const chunk of streamResponse) {
-              // Check if aborted during streaming
-              if (options.abortSignal?.aborted) {
-                const abortError = new Error('Request aborted');
-                abortError.name = 'AbortError';
-                controller.error(abortError);
-                return; // Return after error to prevent further processing
-              }
-
-              const candidate = chunk.candidates?.[0];
-              const content = candidate?.content;
-
-              // Update token counts if available
-              if (chunk.usageMetadata) {
-                totalInputTokens = chunk.usageMetadata.promptTokenCount || 0;
-                totalOutputTokens =
-                  chunk.usageMetadata.candidatesTokenCount || 0;
-              }
-
-              if (content?.parts) {
-                for (const part of content.parts) {
-                  if (part.text) {
-                    // Emit text-start if this is the first text chunk
-                    if (!textPartId) {
-                      textPartId = randomUUID();
-                      controller.enqueue({
-                        type: 'text-start',
-                        id: textPartId,
-                      });
-                    }
-
-                    // Stream text delta with stable id
-                    controller.enqueue({
-                      type: 'text-delta',
-                      id: textPartId,
-                      delta: part.text,
-                    });
-                  } else if (part.functionCall) {
-                    hasToolCalls = true;
-                    // Extract thoughtSignature from Gemini Part for tool loop propagation
-                    const geminiPart = part as { thoughtSignature?: string };
-                    // Emit tool call with providerMetadata containing thoughtSignature
-                    controller.enqueue({
-                      type: 'tool-call',
-                      toolCallId: randomUUID(),
-                      toolName: part.functionCall.name || '',
-                      input: JSON.stringify(part.functionCall.args || {}),
-                      // Expose thoughtSignature for AI SDK propagation
-                      ...(geminiPart.thoughtSignature
-                        ? {
-                            providerMetadata: {
-                              'gemini-cli': { thoughtSignature: geminiPart.thoughtSignature },
-                            },
-                          }
-                        : {}),
-                    });
-                  }
-                }
-              }
-
-              if (candidate?.finishReason) {
-                const duration = Date.now() - streamStartTime;
-                logger.info(
-                  `[gemini-cli] Stream completed - Duration: ${duration}ms`
-                );
-
-                logger.debug(
-                  `[gemini-cli] Stream token usage - Input: ${totalInputTokens}, Output: ${totalOutputTokens}, Total: ${totalInputTokens + totalOutputTokens}`
-                );
-
-                // Close text part if it was opened
-                if (textPartId) {
-                  controller.enqueue({
-                    type: 'text-end',
-                    id: textPartId,
+            const abortPromise = new Promise<never>((_, reject) => {
+              if (options.abortSignal) {
+                abortHandler = () => {
+                  const abortError = new Error('Request aborted');
+                  abortError.name = 'AbortError';
+                  reject(abortError);
+                };
+                if (options.abortSignal.aborted) {
+                  abortHandler();
+                } else {
+                  options.abortSignal.addEventListener('abort', abortHandler, {
+                    once: true,
                   });
                 }
+              }
+            });
 
-                // Determine finish reason - use 'tool-calls' if tools were called
-                const finishReason = hasToolCalls
-                  ? ({
-                      unified: 'tool-calls',
-                      raw: candidate.finishReason,
-                    } as LanguageModelV3FinishReason)
-                  : mapGeminiFinishReason(candidate.finishReason);
-                logger.debug(
-                  `[gemini-cli] Stream finish reason: ${finishReason.unified}`
-                );
+            try {
+              while (true) {
+                // Check if aborted before fetching next chunk
+                if (options.abortSignal?.aborted) {
+                  throw new Error('Request aborted');
+                }
 
-                // Emit response metadata
-                controller.enqueue({
-                  type: 'response-metadata',
-                  id: randomUUID(),
-                  timestamp: new Date(),
-                  modelId: modelId,
-                });
+                const result = options.abortSignal
+                  ? await Promise.race([iterator.next(), abortPromise])
+                  : await iterator.next();
 
-                // Emit finish event
-                controller.enqueue({
-                  type: 'finish',
-                  finishReason,
-                  usage: {
-                    inputTokens: {
-                      total: totalInputTokens,
-                      noCache: undefined,
-                      cacheRead: undefined,
-                      cacheWrite: undefined,
+                if (result.done) break;
+
+                const chunk = result.value;
+                const candidate = chunk.candidates?.[0];
+                const content = candidate?.content;
+                // Update token counts if available
+                if (chunk.usageMetadata) {
+                  totalInputTokens = chunk.usageMetadata.promptTokenCount || 0;
+                  totalOutputTokens =
+                    chunk.usageMetadata.candidatesTokenCount || 0;
+                }
+
+                if (content?.parts) {
+                  for (const part of content.parts) {
+                    if (part.text) {
+                      // Emit text-start if this is the first text chunk
+                      if (!textPartId) {
+                        textPartId = randomUUID();
+                        controller.enqueue({
+                          type: 'text-start',
+                          id: textPartId,
+                        });
+                      }
+
+                      // Stream text delta with stable id
+                      controller.enqueue({
+                        type: 'text-delta',
+                        id: textPartId,
+                        delta: part.text,
+                      });
+                    } else if (part.functionCall) {
+                      hasToolCalls = true;
+                      // Extract thoughtSignature from Gemini Part for tool loop propagation
+                      const geminiPart = part as { thoughtSignature?: string };
+                      // Emit tool call with providerMetadata containing thoughtSignature
+                      controller.enqueue({
+                        type: 'tool-call',
+                        toolCallId: randomUUID(),
+                        toolName: part.functionCall.name || '',
+                        input: JSON.stringify(part.functionCall.args || {}),
+                        // Expose thoughtSignature for AI SDK propagation
+                        ...(geminiPart.thoughtSignature
+                          ? {
+                              providerMetadata: {
+                                'gemini-cli': {
+                                  thoughtSignature: geminiPart.thoughtSignature,
+                                },
+                              },
+                            }
+                          : {}),
+                      });
+                    }
+                  }
+                }
+
+                if (candidate?.finishReason) {
+                  const duration = Date.now() - streamStartTime;
+                  logger.info(
+                    `[gemini-cli] Stream completed - Duration: ${duration}ms`
+                  );
+
+                  logger.debug(
+                    `[gemini-cli] Stream token usage - Input: ${totalInputTokens}, Output: ${totalOutputTokens}, Total: ${totalInputTokens + totalOutputTokens}`
+                  );
+
+                  // Close text part if it was opened
+                  if (textPartId) {
+                    controller.enqueue({
+                      type: 'text-end',
+                      id: textPartId,
+                    });
+                  }
+
+                  // Determine finish reason - use 'tool-calls' if tools were called
+                  const finishReason = hasToolCalls
+                    ? ({
+                        unified: 'tool-calls',
+                        raw: candidate.finishReason,
+                      } as LanguageModelV3FinishReason)
+                    : mapGeminiFinishReason(candidate.finishReason);
+                  logger.debug(
+                    `[gemini-cli] Stream finish reason: ${finishReason.unified}`
+                  );
+
+                  // Emit response metadata
+                  controller.enqueue({
+                    type: 'response-metadata',
+                    id: randomUUID(),
+                    timestamp: new Date(),
+                    modelId: modelId,
+                  });
+
+                  // Emit finish event
+                  controller.enqueue({
+                    type: 'finish',
+                    finishReason,
+                    usage: {
+                      inputTokens: {
+                        total: totalInputTokens,
+                        noCache: undefined,
+                        cacheRead: undefined,
+                        cacheWrite: undefined,
+                      },
+                      outputTokens: {
+                        total: totalOutputTokens,
+                        text: undefined,
+                        reasoning: undefined,
+                      },
                     },
-                    outputTokens: {
-                      total: totalOutputTokens,
-                      text: undefined,
-                      reasoning: undefined,
-                    },
-                  },
-                });
+                  });
+                }
+              }
+            } finally {
+              if (options.abortSignal && abortHandler) {
+                options.abortSignal.removeEventListener('abort', abortHandler);
               }
             }
 
