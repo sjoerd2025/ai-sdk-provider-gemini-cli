@@ -13,27 +13,13 @@ import type {
   ContentGenerator,
   ContentGeneratorConfig,
 } from '@google/gemini-cli-core';
-import type {
-  GenerateContentParameters,
-  GenerateContentConfig,
+import {
+  ThinkingLevel,
+  type GenerateContentParameters,
+  type GenerateContentConfig,
 } from '@google/genai';
 
-/**
- * ThinkingLevel enum for Gemini 3 models.
- * Note: This is defined locally as @google/genai v1.30.0 doesn't export it yet.
- * Values match the official @google/genai v1.34.0 ThinkingLevel enum format.
- * Will be replaced with the official enum when gemini-cli-core upgrades.
- */
-export enum ThinkingLevel {
-  /** Minimizes latency and cost. Best for simple tasks. */
-  LOW = 'LOW',
-  /** Balanced thinking for most tasks. (Gemini 3 Flash only) */
-  MEDIUM = 'MEDIUM',
-  /** Maximizes reasoning depth. May take longer for first token. */
-  HIGH = 'HIGH',
-  /** Matches "no thinking" for most queries. (Gemini 3 Flash only) */
-  MINIMAL = 'MINIMAL',
-}
+export { ThinkingLevel };
 import { initializeGeminiClient } from './client';
 import { mapPromptToGeminiFormat } from './message-mapper';
 import { mapGeminiToolConfig, mapToolsToGeminiFormat } from './tool-mapper';
@@ -423,7 +409,7 @@ export class GeminiLanguageModel implements LanguageModelV3 {
         this.logger.debug('[gemini-cli] Executing generateContent request');
 
         response = await contentGenerator.generateContent(
-          request,
+          request as any,
           randomUUID()
         );
 
@@ -629,7 +615,7 @@ export class GeminiLanguageModel implements LanguageModelV3 {
         );
 
         streamResponse = await contentGenerator.generateContentStream(
-          request,
+          request as any,
           randomUUID()
         );
 
