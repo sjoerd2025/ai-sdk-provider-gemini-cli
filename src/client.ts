@@ -175,8 +175,15 @@ export async function initializeGeminiClient(
     config.apiKey = options.apiKey;
   } else if (options.authType === 'vertex-ai' && options.vertexAI) {
     config.vertexai = true;
-    // Note: Vertex AI project/location configuration might need to be
-    // handled through environment variables or other means
+    if (options.vertexAI.projectId) {
+      process.env.GOOGLE_CLOUD_PROJECT = options.vertexAI.projectId;
+    }
+    if (options.vertexAI.location) {
+      process.env.GOOGLE_CLOUD_LOCATION = options.vertexAI.location;
+    }
+    if (options.vertexAI.apiKey) {
+      config.apiKey = options.vertexAI.apiKey;
+    }
   }
 
   // Create content generator - pass the configMock as the second parameter and sessionId
